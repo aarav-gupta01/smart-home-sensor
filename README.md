@@ -31,16 +31,16 @@ This project creates an intelligent IoT sensor network for smart home automation
 
 ## Features
 
-- 🌡️ **Multi-sensor Environmental Monitoring**: Track temperature, humidity, pressure, and air quality
-- 👤 **Presence Detection**: Real-time occupancy sensing with the STHS34PF80
-- 📡 **MQTT Protocol**: Lightweight, reliable communication between ESP32 and Raspberry Pi
-- 💾 **Data Persistence**: Continuous logging of sensor readings for historical analysis
-- 📊 **Web Dashboard**: Local visualization of real-time and historical sensor data
-- 🏠 **Smart Home Ready**: Foundation for automation rules and integrations
+- **Multi-sensor Environmental Monitoring**: Track temperature, humidity, pressure, and air quality
+- **Presence Detection**: Real-time occupancy sensing with the STHS34PF80
+- **MQTT Protocol**: Lightweight, reliable communication between ESP32 and Raspberry Pi
+- **Data Persistence**: Continuous logging of sensor readings for historical analysis
+- **Web Dashboard**: Local visualization of real-time and historical sensor data
+- **Smart Home Ready**: Foundation for automation rules and integrations
 
 ## Project Status
 
-⚠️ **Early Development** - This project is in its initial phases. Core architecture and hardware integration work is planned.
+**Early Development** - This project is in its initial phases. Core architecture and hardware integration work is planned.
 
 ## Planned Milestones
 
@@ -186,4 +186,4 @@ For questions or suggestions, please open an issue on this repository.
 ---
 
 **Last Updated**: June 2026  
-**Project Status**: Early Development 🚀
+**Project Status**: Early Development
