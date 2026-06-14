@@ -24,7 +24,7 @@ publisher and subscriber scripts are functional.
 - [x] Raspberry Pi set up and running
 - [x] MQTT broker configured
 - [x] Publisher/subscriber scripts working
-- [ ] ESP32 in shipment
+- [ ] ESP32 integration
 - [ ] STHS34PF80 soldered, awaiting wiring
 - [ ] BME680 awaiting soldering and wiring
 - [ ] Dashboard in planning
