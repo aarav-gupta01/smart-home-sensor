@@ -173,7 +173,7 @@ _Will be expanded as common issues are encountered._
 
 ## References and Resources
 
-- [BME680 Datasheet (PDF)](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme680-ds001.pdf)
+- [BME680 Datasheet](https://www.bosch-sensortec.com/media/boschsensortec/downloads/datasheets/bst-bme680-ds001.pdf)
 - [STHS34PF80 Datasheet](https://www.st.com/resource/en/datasheet/sths34pf80.pdf)
 - [ESP32 Documentation](https://docs.espressif.com/projects/esp-idf/en/latest/)
 - [Raspberry Pi Documentation](https://www.raspberrypi.com/documentation/)
