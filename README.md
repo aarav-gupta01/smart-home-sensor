@@ -159,7 +159,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## Roadmap
 
 - [ ] ESP32 firmware development
-- [ ] MQTT broker configuration
+- [x] MQTT broker configuration
 - [ ] Data logging system
 - [ ] Web dashboard UI/UX design
 - [ ] Data visualization
