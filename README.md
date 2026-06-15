@@ -26,7 +26,7 @@ publisher and subscriber scripts are functional.
 - [x] Publisher/subscriber scripts working
 - [ ] ESP32 integration
 - [ ] STHS34PF80 soldered, awaiting wiring
-- [ ] BME680 awaiting soldering and wiring
+- [ ] BME680 soldered, awaiting wiring
 - [ ] Dashboard in planning
 
 ## Project Structure
