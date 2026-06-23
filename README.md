@@ -21,13 +21,13 @@ publisher and subscriber scripts are functional.
 
 ## Current Status
 
-- [x] Raspberry Pi set up and running
-- [x] MQTT broker configured
-- [x] Publisher/subscriber scripts working
-- [ ] ESP32 integration
-- [ ] STHS34PF80 soldered, awaiting wiring
-- [ ] BME680 soldered, awaiting wiring
-- [ ] Dashboard in planning
+- Raspberry Pi set up and running
+- MQTT broker configured
+- Publisher/subscriber scripts in progress
+- ESP32 integration on hold
+- STHS34PF80 soldered and wired
+- BME680 soldered, awaiting wiring
+- Dashboard in planning
 
 ## Project Structure
 
@@ -44,6 +44,9 @@ smart-home-sensor/
 │       └── app.py
 ├── esp32/
 │   └── main.py
+├── sensors/
+│   ├── read_bme680.py
+│   └── read_sths34pf80.py
 └── docs/
     └── wiring.md
 ```
