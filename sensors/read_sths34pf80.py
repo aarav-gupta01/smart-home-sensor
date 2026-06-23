@@ -25,4 +25,4 @@ while True:
         print(f"Presence Value: {presence_value} {'[DETECTED]' if presence else '[NOT DETECTED]'}")
         print(f"Motion Value: {motion_value} {'[DETECTED]' if motion else '[NOT DETECTED]'}")
         print(f"Temperature Shock Value: {temp_shock_value} {'[DETECTED]' if temp_shock else '[NOT DETECTED]'}")
-    time.sleep(0.05)
+    time.sleep(1)
