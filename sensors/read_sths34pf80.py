@@ -1,6 +1,6 @@
 import time
-import adafruit_sths34pf80
-import board
+import adafruit_sths34pf80  # type: ignore[reportMissingImports]
+import board  # type: ignore[reportMissingImports]
 
 i2c = board.I2C()
 sensor = adafruit_sths34pf80.STHS34PF80(i2c)
