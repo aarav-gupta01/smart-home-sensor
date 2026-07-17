@@ -1,23 +1,23 @@
 import time
 import adafruit_sths34pf80  # type: ignore[reportMissingImports]
-import board
+import board # type: ignore[reportMissingImports]
 
 i2c = board.I2C()
-sensor = adafruit_sths34pf80.STHS34PF80(i2c)
+sths34pf80 = adafruit_sths34pf80.STHS34PF80(i2c)
 
 while True:
-    if sensor.data_ready:
-        ambient_temp = sensor.ambient_temperature
-        object_temp = sensor.object_temperature
-        comp_object_temp = sensor.compensated_object_temperature
+    if sths34pf80.data_ready:
+        ambient_temp = sths34pf80.ambient_temperature
+        object_temp = sths34pf80.object_temperature
+        comp_object_temp = sths34pf80.compensated_object_temperature
 
-        presence_value = sensor.presence_value
-        motion_value = sensor.motion_value
-        temp_shock_value = sensor.temperature_shock_value
+        presence_value = sths34pf80.presence_value
+        motion_value = sths34pf80.motion_value
+        temp_shock_value = sths34pf80.temperature_shock_value
 
-        presence = sensor.presence
-        motion = sensor.motion
-        temp_shock = sensor.temperature_shock
+        presence = sths34pf80.presence
+        motion = sths34pf80.motion
+        temp_shock = sths34pf80.temperature_shock
 
         print(f"Ambient Temperature: {ambient_temp:.2f} °C")
         print(f"Object Temperature: {object_temp}")

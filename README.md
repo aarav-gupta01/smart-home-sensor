@@ -19,6 +19,18 @@ which renders the data onto a web dashboard.
 The MQTT broker is configured and running on the Raspberry Pi. Basic
 publisher and subscriber scripts are functional.
 
+The `main()` function in `esp32/sensors/sths34pf80.py` was written by me after
+studying the sample code in the `Adafruit_CircuitPython_STHS34PF80` GitHub
+repository. I used the sample code provided in the repository to learn the library API and typical usage pattern before writing my own sensor read code.
+
+## Project Evolution
+
+This project started with the STHS34PF80 and BME680 sensors wired directly to
+the Raspberry Pi 5 for early bring-up and sensor validation. The architecture is
+now moving to an ESP32 sensor gateway that reads both sensors over I2C and will
+publish readings to the Pi over MQTT. The previous Pi-direct sensor architecture
+is preserved in the `pi-only-v1` git tag.
+
 ## Current Status
 
 - Raspberry Pi set up and running
@@ -33,20 +45,23 @@ publisher and subscriber scripts are functional.
 
 ```
 smart-home-sensor/
-├── README.md
-├── LICENSE
 ├── .gitignore
-├── pi/
-│   ├── mqtt/
-│   │   ├── publisher.py
-│   │   └── subscriber.py
-│   └── dashboard/
-│       └── app.py
+├── LICENSE
+├── README.md
+├── docs/
+│   └── wiring.md
 ├── esp32/
-│   └── main.py
+│   ├── main.py
+│   └── sensors/
+│       ├── bme680.py
+│       └── sths34pf80.py
+├── pi/
+│   ├── dashboard/
+│   │   └── app.py
+│   └── mqtt/
+│       ├── publisher.py
+│       └── subscriber.py
 ├── sensors/
 │   ├── read_bme680.py
 │   └── read_sths34pf80.py
-└── docs/
-    └── wiring.md
 ```
