@@ -199,7 +199,7 @@ class STHS34PF80:
         return self._read_bit(_FUNC_STATUS, 2)
 
     @property
-    def object_temperature(self):
+    def object_temperature(self): # raw radiometric LSB counts, not degrees Celsius; see datasheet §11 / AN5867 before treating as absolute temperature.
         return self._read_i16(_TOBJECT_L)
 
     @property
@@ -207,7 +207,7 @@ class STHS34PF80:
         return self._read_i16(_TAMBIENT_L) / 100.0
 
     @property
-    def compensated_object_temperature(self):
+    def compensated_object_temperature(self): # raw radiometric LSB counts, not degrees Celsius; see datasheet §11 / AN5867 before treating as absolute temperature.
         return self._read_i16(_TOBJ_COMP_L)
 
     @property
@@ -292,43 +292,3 @@ class STHS34PF80:
 
 def make_i2c(i2c_id=DEFAULT_I2C_ID, sda=DEFAULT_SDA_PIN, scl=DEFAULT_SCL_PIN):
     return I2C(i2c_id, sda=Pin(sda), scl=Pin(scl), freq=DEFAULT_I2C_FREQ)
-
-
-def main():
-    i2c = make_i2c()
-    sths34pf80 = STHS34PF80(i2c)
-
-    while True:
-        if sths34pf80.data_ready:
-            ambient_temp = sths34pf80.ambient_temperature
-            object_temp = sths34pf80.object_temperature
-            comp_object_temp = sths34pf80.compensated_object_temperature
-
-            presence_value = sths34pf80.presence_value
-            motion_value = sths34pf80.motion_value
-            temp_shock_value = sths34pf80.temperature_shock_value
-
-            presence = sths34pf80.presence
-            motion = sths34pf80.motion
-            temp_shock = sths34pf80.temperature_shock
-
-            print("Ambient Temperature: %.2f C" % ambient_temp)
-            print("Object Temperature: %s" % object_temp)
-            print("Compensated Object Temperature: %s" % comp_object_temp)
-            print(
-                "Presence Value: %s %s"
-                % (presence_value, "[DETECTED]" if presence else "[NOT DETECTED]")
-            )
-            print(
-                "Motion Value: %s %s"
-                % (motion_value, "[DETECTED]" if motion else "[NOT DETECTED]")
-            )
-            print(
-                "Temperature Shock Value: %s %s"
-                % (temp_shock_value, "[DETECTED]" if temp_shock else "[NOT DETECTED]")
-            )
-        time.sleep(1)
-
-
-if __name__ == "__main__":
-    main()

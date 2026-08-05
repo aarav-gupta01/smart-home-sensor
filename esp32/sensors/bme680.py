@@ -362,11 +362,3 @@ class BME680_I2C(Adafruit_BME680):
 # The BME680_SPI class has been removed here since this project only uses
 # the sensor over I2C; only Adafruit_BME680 and BME680_I2C remain above.
 # --------------------------------------------------------------------------
-
-def main():
-    i2c = BME680_I2C()
-    bme680 = Adafruit_BME680(i2c)
-    
-    while True:
-        if bme680.data_ready:
-            pass
