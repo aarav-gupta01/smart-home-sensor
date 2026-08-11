@@ -4,11 +4,13 @@ import config_mqtt
 
 def on_connect(client, userdata, flags, rc):
     print("Connected")
-    client.subscribe(config_mqtt.topic_sths34pf80)
+    client.subscribe('roomsensor/#')
 
 def on_message(client, userdata, msg):
-    value = json.loads(msg.payload)
-    print(msg.topic, value['distance'])
+    payload = json.loads(msg.payload)
+    print(msg.topic)
+    for key, val in payload.items():
+        print(f"{key}: {val}")
 
 client = mqtt.Client()
 client.on_connect = on_connect

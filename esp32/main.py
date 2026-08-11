@@ -1,8 +1,9 @@
 import time
+import publisher
+import config_esp32
 from sensors.sths34pf80 import STHS34PF80, make_i2c
 from sensors.bme680 import BME680_I2C
 
-from machine import Pin
 
 #Initialize I2C Bus
 i2c = make_i2c(scl=33, sda=32)
@@ -11,6 +12,10 @@ print(i2c.scan())
 #Initialize Sensors
 bme680 = BME680_I2C(i2c, address=0x76)
 sths34pf80 = STHS34PF80(i2c)
+
+#Initialize network/MQTT
+wlan = publisher.connect_network()
+client = publisher.connect_client()
 
 #Loop to read STHS34PF80 and BME680
 while True:
@@ -28,37 +33,62 @@ while True:
         motion = sths34pf80.motion
         temp_shock = sths34pf80.temperature_shock
 
-        print("Ambient Temperature: %.2f C" % ambient_temp)
-        #print("Object Temperature: %s" % object_temp)                    Unnecessary Values
-        #print("Compensated Object Temperature: %s" % comp_object_temp)                    Unnecessary Values
-        print(
-                "Presence Value: %s %s"
-                % (presence_value, "[DETECTED]" if presence else "[NOT DETECTED]"))
-        print(
-                "Motion Value: %s %s"
-                % (motion_value, "[DETECTED]" if motion else "[NOT DETECTED]")
-            )
-        print(
-                "Temperature Shock Value: %s %s"
-                % (temp_shock_value, "[DETECTED]" if temp_shock else "[NOT DETECTED]")
-            )
-        
-    if bme680:
-    
-        bme680.sea_level_pressure = 1013.25
+        #STHS34PF80 print statements from testing phase
+        # print("Ambient Temperature: %.2f C" % ambient_temp)
+        # #print("Object Temperature: %s" % object_temp)                    Unnecessary Values
+        # #print("Compensated Object Temperature: %s" % comp_object_temp)                    Unnecessary Values
+        # print(
+        #         "Presence Value: %s %s"
+        #         % (presence_value, "[DETECTED]" if presence else "[NOT DETECTED]"))
+        # print(
+        #         "Motion Value: %s %s"
+        #         % (motion_value, "[DETECTED]" if motion else "[NOT DETECTED]")
+        #     )
+        # print(
+        #         "Temperature Shock Value: %s %s"
+        #         % (temp_shock_value, "[DETECTED]" if temp_shock else "[NOT DETECTED]")
+        #     )
 
-        temperature_offset = -5
+        sths_data = {
+            "ambient_temp": ambient_temp,
+            "presence": presence,
+            "presence_value": presence_value,
+            "motion": motion,
+            "motion_value": motion_value,
+            "temp_shock": temp_shock,
+            "temp_shock_value": temp_shock_value
+        }
 
-        temperature = bme680.temperature + temperature_offset
-        gas = bme680.gas
-        humidity = bme680.humidity
-        pressure = bme680.pressure
-        altitude = bme680.altitude
+        publisher.publish_data(client, config_esp32.topic_sths34pf80, sths_data)
 
-        print(f"\nTemperature: {temperature:0.1f} C")
-        print(f"Gas: {gas:d} ohm")
-        print(f"Humidity: {humidity:.1f} %")
-        print(f"Pressure: {pressure:.3f} hPa")
-        print(f"Altitude = {altitude:.2f} meters")
+
+    # BME680 values    
+    bme680.sea_level_pressure = 1013.25
+
+    temperature_offset = -5
+
+    temperature = bme680.temperature + temperature_offset
+    gas = bme680.gas
+    humidity = bme680.humidity
+    pressure = bme680.pressure
+    altitude = bme680.altitude
+
+
+    #BME680 print statements from testing phase
+    # print(f"\nTemperature: {temperature:0.1f} C")
+    # print(f"Gas: {gas:d} ohm")
+    # print(f"Humidity: {humidity:.1f} %")
+    # print(f"Pressure: {pressure:.3f} hPa")
+    # print(f"Altitude = {altitude:.2f} meters")
+
+    bme680_data = {
+        "temperature": temperature,
+        "gas": gas,
+        "humidity": humidity,
+        "pressure": pressure,
+        "altitude": altitude
+        }
+
+    publisher.publish_data(client, config_esp32.topic_bme680, bme680_data)
 
     time.sleep(1)
