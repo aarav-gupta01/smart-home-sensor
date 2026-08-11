@@ -1,15 +1,14 @@
 # Smart Home Sensor Network
 
 A work-in-progress smart-home sensing system built around an ESP32 and a
-Raspberry Pi 5. The ESP32 currently reads a BME680 environmental sensor and an
-STHS34PF80 infrared presence sensor over one I2C bus and prints their readings
-to its serial console.
+Raspberry Pi 5. The ESP32 reads a BME680 environmental sensor and an
+STHS34PF80 infrared presence sensor over one shared I2C bus and publishes
+their readings as JSON over Wi-Fi and MQTT to a Mosquitto broker on the
+Raspberry Pi.
 
-The longer-term goal is for the ESP32 to publish those readings over Wi-Fi and
-MQTT to a Mosquitto broker on the Raspberry Pi, where they can be displayed in
-a web dashboard. The Wi-Fi and MQTT link now works end to end as a standalone
-script with a hardcoded test payload, but it is not yet driven by real sensor
-readings, and the dashboard is not implemented.
+The full sensor-to-broker path is working and hardware-verified. The longer-term
+goal is to persist those readings and display them in a web dashboard; neither
+is implemented yet.
 
 ## Current Status
 
@@ -23,21 +22,22 @@ Implemented and hardware-tested locally:
 - Both sensor drivers and the combined read loop have been tested with live
   hardware.
 - Mosquitto is configured and running on the Raspberry Pi.
-- `esp32/publisher.py` connects the ESP32 to Wi-Fi and publishes a hardcoded
-  JSON test payload to the broker. Verified end to end against
-  `pi/mqtt/subscriber.py`, which
-  receives the message, decodes it with `json.loads()`, and prints a value from
-  it.
+- `esp32/publisher.py` provides importable Wi-Fi and MQTT helpers:
+  `connect_network()`, `connect_client()`, and `publish_data(client, topic,
+  data)`. It has no top-level side effects, so `main.py` can import it safely.
+- `esp32/main.py` brings up Wi-Fi and the MQTT client once before the read
+  loop, then publishes one JSON object per sensor per reading, each to its own
+  topic. Verified end to end on live hardware: both topics arrive at the
+  subscriber with complete payloads.
+- `pi/mqtt/subscriber.py` subscribes to `roomsensor/#`, so one script receives
+  both sensors, and prints every key in each decoded payload.
 - Wi-Fi credentials live in a gitignored `hidden.py` that is never committed.
   Non-secret settings live in per-device config modules.
 
 Not implemented yet:
 
-- Publishing real sensor readings. `esp32/publisher.py` sends a hardcoded
-  `{"distance": 42}` test payload, publishes once, and exits. It is a
-  standalone script and is not imported or called by `esp32/main.py`, so no
-  measurement from either sensor has crossed MQTT yet.
 - Wi-Fi or MQTT reconnection handling
+- Persisting readings to a database
 - The web dashboard
 - Complete wiring documentation
 - Automated tests
@@ -51,39 +51,37 @@ Current data path:
 
 ```text
 BME680 (0x76) ---------\
-                       +-- shared I2C --> ESP32 --> serial output
+                       +-- shared I2C --> ESP32 --> Wi-Fi/MQTT --> Mosquitto --> pi/mqtt/subscriber.py
 STHS34PF80 (0x5A) ----/
-```
-
-Separately, and not yet joined to the path above:
-
-```text
-esp32/publisher.py --> Wi-Fi/MQTT --> Mosquitto on Raspberry Pi --> pi/mqtt/subscriber.py
 ```
 
 Planned data path:
 
 ```text
-Sensors --> ESP32 --> Wi-Fi/MQTT --> Mosquitto on Raspberry Pi --> web dashboard
+Sensors --> ESP32 --> Wi-Fi/MQTT --> Mosquitto --> database --> web dashboard
 ```
 
 `esp32/main.py` owns the application flow: it requests the I2C bus, creates both
-sensor objects, and runs the only infinite read loop. The sensor modules provide
-the device classes and register access; they do not start their own application
-loops. Keeping coordination in one place lets both devices safely share the bus
-and leaves one location for future MQTT publishing.
+sensor objects, brings up Wi-Fi and MQTT, and runs the only infinite read loop.
+The sensor modules provide the device classes and register access; they do not
+start their own application loops. `esp32/publisher.py` provides connection and
+publish helpers but never runs anything on import. Keeping coordination in one
+place lets both devices safely share the bus and gives the MQTT link a single
+owner.
 
-Joining the two paths is the next step: the Wi-Fi and MQTT setup in
-`esp32/publisher.py` needs to become importable functions that `main.py` calls
-once before its read loop, with the publish call moving inside the loop and
-taking real readings.
+Each sensor's payload is built and published inside the block that read it,
+rather than assembled together at the end of the loop. This matters because the
+two sensors have different read models: a skipped STHS34PF80 read must produce
+no message at all, not a message rebuilt from the previous iteration's
+still-bound variables. Keeping the publish next to its own read makes stale
+republishing structurally impossible.
 
 ## Hardware and Active Configuration
 
 | Component | Current role | Planned role |
 |---|---|---|
 | Raspberry Pi 5 | Runs the Mosquitto MQTT broker | Hosts the web dashboard |
-| ESP32 | Runs MicroPython, acts as the shared-I2C sensor gateway, and publishes a test payload over Wi-Fi and MQTT | Publishes real sensor readings |
+| ESP32 | Runs MicroPython, acts as the shared-I2C sensor gateway, and publishes real sensor readings over Wi-Fi and MQTT | Reconnects automatically after a Wi-Fi or broker drop |
 | BME680 | Measures temperature, relative humidity, barometric pressure, and gas resistance | No change |
 | STHS34PF80 | Reports ambient temperature, presence, motion, and temperature-shock signals | No change |
 
@@ -126,50 +124,117 @@ generates its own.
 Wi-Fi credentials are not in either config module. They belong in a `hidden.py`
 that is listed in `.gitignore` and never committed; see the setup steps below.
 
+## Message Payloads
+
+Each reading produces one JSON object containing all of that sensor's fields,
+published to that sensor's own topic. One message maps to one row, so the shape
+carries over directly when database persistence is added.
+
+`roomsensor/bme680`, published every loop iteration:
+
+| Key | Type | Notes |
+|---|---|---|
+| `temperature` | float | Degrees Celsius, includes the `-5` offset |
+| `gas` | int | Gas resistance in ohms, uncalibrated |
+| `humidity` | float | Relative humidity, percent |
+| `pressure` | float | hPa |
+| `altitude` | float | Meters, derived from `sea_level_pressure` |
+
+`roomsensor/sths34pf80`, published only when `data_ready` is set:
+
+| Key | Type | Notes |
+|---|---|---|
+| `ambient_temp` | float | Degrees Celsius |
+| `presence` | bool | Detection flag |
+| `presence_value` | int | Raw presence register value |
+| `motion` | bool | Detection flag |
+| `motion_value` | int | Raw motion register value |
+| `temp_shock` | bool | Detection flag |
+| `temp_shock_value` | int | Raw temperature-shock register value |
+
+Both the boolean flag and the raw value are sent for each STHS34PF80 signal.
+The flag is easier to read directly; the raw value cannot be recovered from the
+flag afterwards, so both are recorded.
+
+The two topics publish at different rates. The BME680 message goes out on every
+iteration; the STHS34PF80 message only when the sensor reports new data.
+
 ## Running the ESP32 Firmware
+
+Publishing is part of the boot sequence, so `publisher.py`, `config_esp32.py`,
+and `hidden.py` are all required for `main.py` to run.
 
 1. Flash a compatible MicroPython build onto the ESP32.
 2. Copy `esp32/main.py` to `/main.py` on the board.
-3. Copy `esp32/sensors/bme680.py` and `esp32/sensors/sths34pf80.py` into a
+3. Copy `esp32/publisher.py` and `esp32/config_esp32.py` to the board root. The
+   board's filesystem is flat, so these sit alongside `main.py` rather than in
+   an `esp32/` directory, and the imports inside them are written accordingly.
+4. Copy `esp32/sensors/bme680.py` and `esp32/sensors/sths34pf80.py` into a
    `/sensors/` directory on the board, preserving the repository layout.
-4. Connect both sensors to the configured SDA/SCL pins, power, and ground.
-5. Reset the board and open its serial console to view the scan and readings.
+5. Create a `hidden.py` at the board root defining two variables, `SSID` and
+   `PASSWORD`, holding the Wi-Fi network name and password. This file is
+   gitignored and is not in the repository, so it must be written by hand on
+   each board. Editing the copy in the working tree does not update the board;
+   re-save it to the device after any change.
+6. Ensure `umqtt.simple` is available on the board. Check with
+   `import umqtt.simple` at the REPL; if it raises `ImportError`, install
+   `micropython-umqtt.simple` through Thonny's package manager.
+7. Connect both sensors to the configured SDA/SCL pins, power, and ground.
+8. Reset the board. It prints the I2C scan, then `Connecting...`, then the
+   assigned IP, and begins publishing.
 
 The ESP32 firmware carries its sensor drivers in the repository and does not
 need the CircuitPython sensor packages used by the historical Raspberry Pi
 scripts.
 
-### Running the MQTT test publisher
+### Running the subscriber
 
-`esp32/publisher.py` is currently run by hand and is not part of the boot
-sequence. To run it:
+Run `pi/mqtt/subscriber.py` on any machine with `paho-mqtt` installed and
+network access to the broker. It subscribes to `roomsensor/#`, so it receives
+both sensors through a single subscription, and prints the topic followed by
+every key and value in the decoded payload.
 
-1. Copy `esp32/publisher.py` and `esp32/config_esp32.py` to the board root. The
-   board's filesystem is flat, so these sit alongside `main.py` rather than in
-   an `esp32/` directory, and the imports inside them are written accordingly.
-2. Create a `hidden.py` at the board root defining two variables, `SSID` and
-   `PASSWORD`, holding the Wi-Fi network name and password. This file is
-   gitignored and is not in the repository, so it must be written by hand on
-   each board. Editing the copy in the working tree does not update the board;
-   re-save it to the device after any change.
-3. Ensure `umqtt.simple` is available on the board. Check with
-   `import umqtt.simple` at the REPL; if it raises `ImportError`, install
-   `micropython-umqtt.simple` through Thonny's package manager.
-4. Start `pi/mqtt/subscriber.py` on a machine with `paho-mqtt` installed and
-   network access to the broker.
-5. Run `publisher.py` on the board. It connects to Wi-Fi, prints the assigned
-   IP, publishes one test message, and disconnects. The subscriber should print
-   the topic and the received value.
+`mosquitto_sub -h 192.168.68.70 -t 'roomsensor/#' -v` is a useful independent
+check when diagnosing whether a problem is on the publishing or the receiving
+side.
+
+### Troubleshooting the Wi-Fi connection
+
+The Wi-Fi wait in `connect_network()` is an unbounded loop that only tests
+`isconnected()`, so a failure to associate presents as an indefinite hang after
+`Connecting...` with no diagnostic. To find the cause, interrupt with Ctrl+C
+(not Ctrl+D, which soft-reboots and clears globals) and query the interface at
+the REPL:
+
+```python
+import network
+w = network.WLAN(network.STA_IF)
+print(w.active(), w.isconnected(), w.status())
+```
+
+A `status()` of `1001` is `STAT_CONNECTING`: the radio is parked mid-association
+and a soft reset will not clear it. Power-cycle the board. `201` means the
+access point was not found, `202` a wrong password; check the board's own copy
+of `hidden.py`, which can drift from the one in the working tree.
+
+One environment-specific cause of a persistent `1001`: on a Mac, adjacent USB-C
+ports commonly share a power budget, and a Thunderbolt device on one port can
+starve its neighbor. The Wi-Fi radio draws the highest current in the system,
+so it fails while lower-current paths — I2C sensor reads and the serial console
+— keep working normally, which disguises a power problem as a network problem.
+Powering the board from a dedicated USB wall adapter avoids this entirely and
+is the right arrangement for unattended operation.
 
 ## Firmware Output and Measurement Notes
 
 On startup, the firmware prints the I2C scan. With both sensors connected, their
-decimal addresses are `90` and `118`. It then prints:
+decimal addresses are `90` and `118`. It then prints `Connecting...` and the
+`ifconfig()` tuple once Wi-Fi associates.
 
-- STHS34PF80 ambient temperature and raw presence, motion, and
-  temperature-shock values with detected/not-detected labels
-- BME680 temperature, gas resistance, relative humidity, pressure, and an
-  altitude estimate
+The per-reading print statements from the testing phase are retained in
+`main.py` but commented out, so the serial console stays quiet during normal
+operation and readings are observed at the subscriber instead. Uncomment them
+when debugging sensor values directly on the board.
 
 The two sensors use different read models:
 
@@ -202,8 +267,8 @@ smart-home-sensor/
 |-- docs/
 |   `-- wiring.md                 # Placeholder
 |-- esp32/
-|   |-- main.py                   # Active firmware entry point and read loop
-|   |-- publisher.py              # Standalone Wi-Fi + MQTT test publisher
+|   |-- main.py                   # Active firmware entry point, read and publish loop
+|   |-- publisher.py              # Wi-Fi + MQTT helpers imported by main.py
 |   |-- config_esp32.py           # Broker address, port, topics, client ID
 |   `-- sensors/
 |       |-- bme680.py             # I2C-only MicroPython BME680 driver
@@ -216,12 +281,12 @@ smart-home-sensor/
     |   `-- app.py                # Placeholder
     `-- mqtt/
         |-- config_mqtt.py        # Broker address, port, topics
-        `-- subscriber.py         # MQTT subscriber, decodes JSON payloads
+        `-- subscriber.py         # Wildcard MQTT subscriber, decodes JSON payloads
 ```
 
 Not shown, because it is gitignored and never committed: `hidden.py`, holding
 the `SSID` and `PASSWORD` variables. A copy is needed at the root of any board
-that runs `publisher.py`.
+that runs `main.py`.
 
 ## Project Evolution and Legacy Version
 
@@ -238,25 +303,36 @@ These archived scripts are not part of the active runtime:
 
 ## Known Limitations
 
-- The current main loop sleeps for one second between iterations, so it does not
+- The main loop sleeps for one second between iterations, and each BME680 field
+  access triggers its own forced measurement with an enforced minimum interval,
+  so a full iteration takes noticeably longer than one second. The loop does not
   consume every sample produced by the STHS34PF80's 2 Hz configuration.
+- The five BME680 fields in a single message come from five separate
+  measurements taken a few hundred milliseconds apart, not one atomic sample.
+  This is acceptable for room climate but means a message is not a single
+  instant in time.
 - The embedded-function page-switch timing in the STHS34PF80 driver references
   ST application note AN5867. That sequencing has worked in hardware testing,
   but it has not been independently verified against the application note and
   remains provisional.
 - Validation currently depends on live hardware testing because the repository
   does not yet contain automated tests.
-- `esp32/publisher.py` publishes a hardcoded payload once and exits. It shares
-  no code with `esp32/main.py`, so the sensor loop and the MQTT link have never
-  run together.
 - Neither the Wi-Fi connection nor the MQTT connection is re-established if it
-  drops. The Wi-Fi wait is an unbounded loop with no timeout, so a wrong
-  password or an unreachable access point hangs the board with no diagnostic.
-  This matters on a mesh network, where the access point can hand a client
-  between nodes.
+  drops. `client.publish()` raises `OSError` on a dead socket, and nothing in
+  the read loop catches it, so a single broker restart or access-point handover
+  ends the loop and the board goes silent until it is power-cycled. This matters
+  on a mesh network, where the access point can hand a client between nodes.
+- The Wi-Fi wait is an unbounded loop with no timeout that only tests
+  `isconnected()`, so a wrong password or an unreachable access point hangs the
+  board with no diagnostic output. See the troubleshooting steps above.
+- The MQTT client ID is a fixed string. A broker closes an existing session when
+  a second connection claims the same ID, so a reconnect implementation must
+  account for the old session being displaced, and two publishers cannot run
+  concurrently.
 - The publisher and subscriber agree on JSON key names only by convention.
-  Nothing enforces the contract, so a mismatch surfaces at runtime as a
-  `KeyError` inside the subscriber's callback.
+  Nothing enforces the contract. The subscriber iterates whatever keys arrive,
+  so a mismatch is not currently fatal, but it will matter once readings are
+  written to fixed database columns.
 - The broker address and topic names are duplicated across
   `esp32/config_esp32.py` and `pi/mqtt/config_mqtt.py` and can drift apart. The
   two devices have separate filesystems, so a single shared module is not
