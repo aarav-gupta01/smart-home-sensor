@@ -6,9 +6,10 @@ STHS34PF80 infrared presence sensor over one shared I2C bus and publishes
 their readings as JSON over Wi-Fi and MQTT to a Mosquitto broker on the
 Raspberry Pi.
 
-The full sensor-to-broker path is working and hardware-verified. The longer-term
-goal is to persist those readings and display them in a web dashboard; neither
-is implemented yet.
+The full sensor-to-broker path is working and hardware-verified, including
+automatic recovery after the broker goes away and returns. The longer-term goal
+is to persist those readings and display them in a web dashboard; neither is
+implemented yet.
 
 ## Current Status
 
@@ -33,10 +34,25 @@ Implemented and hardware-tested locally:
   both sensors, and prints every key in each decoded payload.
 - Wi-Fi credentials live in a gitignored `hidden.py` that is never committed.
   Non-secret settings live in per-device config modules.
+- `connect_network()` bounds its wait with `time.ticks_ms()` and
+  `time.ticks_diff()`, returning the interface object on success or `None` on
+  timeout and printing `wlan.status()` on the way out, so a failure to associate
+  reports its own cause instead of hanging.
+- `esp32/main.py` retries Wi-Fi and MQTT at boot until both succeed, and guards
+  each publish separately so a Wi-Fi or broker drop is recovered inside the read
+  loop. Verified on live hardware: stopping Mosquitto mid-run interrupts
+  publishing, and restarting it resumes publishing with no intervention on the
+  board.
+
+Two recovery paths are implemented but not yet exercised on hardware. Every run
+so far has started with both Wi-Fi and the broker already up, so the boot retry
+loop has only ever completed on its first pass. The Wi-Fi side of the publish
+handler is likewise untested, along with the `connect_network()` timeout branch
+that feeds it. Covering both means one boot with Mosquitto stopped and one run
+with the access point switched off mid-loop.
 
 Not implemented yet:
 
-- Wi-Fi or MQTT reconnection handling
 - Persisting readings to a database
 - The web dashboard
 - Complete wiring documentation
@@ -76,17 +92,27 @@ no message at all, not a message rebuilt from the previous iteration's
 still-bound variables. Keeping the publish next to its own read makes stale
 republishing structurally impossible.
 
+Connection recovery is built from three pieces. `connect_network()` bounds its
+own wait and reports the outcome by return value, the interface object or
+`None`, rather than by raising, so a caller can tell "no network" apart from "no
+broker" without inspecting an exception. `esp32/main.py` retries both at boot
+inside `while client is None:`, because nothing downstream can run without a
+client and there is no later iteration to fall back on. Inside the read loop
+each publish has its own narrow `try`, so an I2C `OSError` from a loose sensor
+wire is never misread as a network fault; a failed rebuild prints and falls
+through, leaving the next iteration to retry rather than looping in place.
+
 ## Hardware and Active Configuration
 
 | Component | Current role | Planned role |
 |---|---|---|
 | Raspberry Pi 5 | Runs the Mosquitto MQTT broker | Hosts the web dashboard |
-| ESP32 | Runs MicroPython, acts as the shared-I2C sensor gateway, and publishes real sensor readings over Wi-Fi and MQTT | Reconnects automatically after a Wi-Fi or broker drop |
+| ESP32 | Runs MicroPython, acts as the shared-I2C sensor gateway, publishes real sensor readings over Wi-Fi and MQTT, and reconnects automatically after a Wi-Fi or broker drop | No change |
 | BME680 | Measures temperature, relative humidity, barometric pressure, and gas resistance | No change |
 | STHS34PF80 | Reports ambient temperature, presence, motion, and temperature-shock signals | No change |
 
-The active hardware configuration is defined in `esp32/main.py` and
-`esp32/sensors/sths34pf80.py`:
+The active hardware configuration is defined in `esp32/main.py`,
+`esp32/publisher.py`, and `esp32/sensors/sths34pf80.py`:
 
 | Setting | Value |
 |---|---|
@@ -100,6 +126,7 @@ The active hardware configuration is defined in `esp32/main.py` and
 | Main-loop delay | 1 second |
 | BME680 temperature offset | `-5` degrees Celsius |
 | Sea-level pressure used for altitude | `1013.25` hPa |
+| Wi-Fi connect timeout | `10000` ms (`out_of_time`) |
 
 The `make_i2c()` helper has GPIO 21/22 defaults, but `main.py` deliberately
 overrides them with the active GPIO 32/33 wiring. Update the call in `main.py`
@@ -181,7 +208,9 @@ and `hidden.py` are all required for `main.py` to run.
    `micropython-umqtt.simple` through Thonny's package manager.
 7. Connect both sensors to the configured SDA/SCL pins, power, and ground.
 8. Reset the board. It prints the I2C scan, then `Connecting...`, then the
-   assigned IP, and begins publishing.
+   assigned IP, and begins publishing. If Wi-Fi or the broker is unavailable, it
+   retries at boot, printing a Wi-Fi status code or `Broker Unreachable,
+   retrying...` on each attempt, and starts publishing once both succeed.
 
 The ESP32 firmware carries its sensor drivers in the repository and does not
 need the CircuitPython sensor packages used by the historical Raspberry Pi
@@ -200,11 +229,12 @@ side.
 
 ### Troubleshooting the Wi-Fi connection
 
-The Wi-Fi wait in `connect_network()` is an unbounded loop that only tests
-`isconnected()`, so a failure to associate presents as an indefinite hang after
-`Connecting...` with no diagnostic. To find the cause, interrupt with Ctrl+C
-(not Ctrl+D, which soft-reboots and clears globals) and query the interface at
-the REPL:
+The Wi-Fi wait in `connect_network()` gives up after ten seconds and prints
+`wlan.status()`, so a failure to associate reports its own cause on the serial
+console. At boot the attempt repeats, so the status code reappears every ten
+seconds for as long as the connection keeps failing. To investigate further,
+interrupt with Ctrl+C (not Ctrl+D, which soft-reboots and clears globals) and
+query the interface at the REPL:
 
 ```python
 import network
@@ -229,7 +259,10 @@ is the right arrangement for unattended operation.
 
 On startup, the firmware prints the I2C scan. With both sensors connected, their
 decimal addresses are `90` and `118`. It then prints `Connecting...` and the
-`ifconfig()` tuple once Wi-Fi associates.
+`ifconfig()` tuple once Wi-Fi associates. A failed association prints a numeric
+`wlan.status()` instead, and a reachable network with an unreachable broker
+prints `Broker Unreachable, retrying...`. Both repeat until the connection
+succeeds, at boot and after a drop mid-run.
 
 The per-reading print statements from the testing phase are retained in
 `main.py` but commented out, so the serial console stays quiet during normal
@@ -317,18 +350,20 @@ These archived scripts are not part of the active runtime:
   remains provisional.
 - Validation currently depends on live hardware testing because the repository
   does not yet contain automated tests.
-- Neither the Wi-Fi connection nor the MQTT connection is re-established if it
-  drops. `client.publish()` raises `OSError` on a dead socket, and nothing in
-  the read loop catches it, so a single broker restart or access-point handover
-  ends the loop and the board goes silent until it is power-cycled. This matters
-  on a mesh network, where the access point can hand a client between nodes.
-- The Wi-Fi wait is an unbounded loop with no timeout that only tests
-  `isconnected()`, so a wrong password or an unreachable access point hangs the
-  board with no diagnostic output. See the troubleshooting steps above.
+- The board does not run at all until both Wi-Fi and the broker are reachable.
+  The boot loop repeats until it holds a live MQTT client, so while the broker
+  is down there are no sensor reads and no output beyond the retry messages.
+  This was chosen over proceeding without a client, which crashed on the first
+  publish, but it does mean the board cannot run as a local-only sensor.
+- Reconnection builds a new `MQTTClient` without explicitly closing the old one,
+  relying on garbage collection to reclaim the orphaned sockets. A multi-minute
+  broker outage, retrying roughly twice per second, reconnected cleanly once the
+  broker returned, so socket exhaustion was not observed on this build. An
+  explicit `sock.close()` would remove the dependency on collection timing.
 - The MQTT client ID is a fixed string. A broker closes an existing session when
-  a second connection claims the same ID, so a reconnect implementation must
-  account for the old session being displaced, and two publishers cannot run
-  concurrently.
+  a second connection claims the same ID, so a reconnect displaces whatever
+  session the broker still holds for the previous connection, and two publishers
+  cannot run concurrently.
 - The publisher and subscriber agree on JSON key names only by convention.
   Nothing enforces the contract. The subscriber iterates whatever keys arrive,
   so a mismatch is not currently fatal, but it will matter once readings are
